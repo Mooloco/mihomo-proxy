@@ -1,0 +1,284 @@
+# Mihomo Gateway V1.0 - config.yaml
+# 代理服务器模式，不启用 TUN / Redir / TProxy
+
+# ============================================================
+# 基础设置
+# ============================================================
+mixed-port: 9070
+socks-port: 9071
+port: 9072
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: info
+ipv6: false
+
+# ============================================================
+# 外部控制 (API)
+# ============================================================
+external-controller: 0.0.0.0:9073
+secret: "__SECRET__"
+
+# ============================================================
+# Geo 数据（自动更新，持久化保存在 config 目录）
+# ============================================================
+geodata-mode: true
+geo-auto-update: true
+geo-update-interval: 24
+geox-url:
+  geoip: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"
+  geosite: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"
+  mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"
+  asn: "https://testingcf.jsdelivr.net/gh/xishang0128/geoip/releases/download/latest/GeoLite2-ASN.mmdb"
+
+# ============================================================
+# DNS 设置（Fake-IP 模式）
+# ============================================================
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.0/15
+
+  # fake-ip-filter：这些域名返回真实 IP，不走 Fake-IP
+  # 原则：需要真实 IP 才能正常工作的域名放这里
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.localhost"
+    - "localhost"
+    - "*.moolo.net"      # Windows AD 域，必须返回真实内网 IP
+    - "moolo.net"
+    - "time.windows.com" # NTP 时间同步
+    - "time.nist.gov"
+    - "time.apple.com"
+    - "pool.ntp.org"
+    - "*.pool.ntp.org"
+
+  # default-nameserver：仅用于解析下方 DoH 域名本身（如 1.1.1.1、dns.google）
+  # 必须是纯 IP 的公网 DNS，不能放域控
+  default-nameserver:
+    - 119.29.29.29
+    - 8.8.8.8
+
+  # nameserver：默认上游，未被 nameserver-policy 命中的域名走这里（国外流量）
+  nameserver:
+    - https://1.1.1.1/dns-query
+    - https://8.8.8.8/dns-query
+    - tls://1.1.1.1
+
+  # nameserver-policy：精确分流，按优先级从上到下匹配
+  nameserver-policy:
+    # Windows AD 域控：必须走域控，拿到真实内网 IP
+    "moolo.net": 192.168.1.3
+    "+.moolo.net": 192.168.1.3
+    # 私有地址 / 局域网域名：走域控兜底
+    "geosite:private": 192.168.1.3
+    # 国内域名：走腾讯 DNS，解析质量有保证
+    "geosite:cn": 192.168.1.3
+
+# ============================================================
+# 代理提供商（Proxy Providers）
+# ============================================================
+proxy-providers:
+  subscription:
+    type: http
+    url: "__CONVERTED_URL__"
+    path: ./providers/proxy/subscription.yaml
+    interval: 86400
+    health-check:
+      enable: true
+      url: "https://www.gstatic.com/generate_204"
+      interval: 300
+      lazy: true
+    proxy: DIRECT
+
+# ============================================================
+# 策略组（Proxy Groups）
+# ============================================================
+proxy-groups:
+  - name: "🚀 节点选择"
+    type: select
+    use:
+      - subscription
+    proxies:
+      - DIRECT
+
+  - name: "♻ 自动选择"
+    type: url-test
+    use:
+      - subscription
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    tolerance: 50
+
+  - name: "🎯 全球直连"
+    type: select
+    proxies:
+      - DIRECT
+      - "🚀 节点选择"
+
+  - name: "🤖 OpenAI"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+
+  - name: "📦 GitHub"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+
+  - name: "🍎 Apple"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+      - DIRECT
+
+  - name: "Ⓜ Microsoft"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+      - DIRECT
+
+  - name: "📨 Telegram"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+
+  - name: "🌍 国外网站"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+
+  - name: "🐟 漏网之鱼"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+      - DIRECT
+
+# ============================================================
+# 规则提供商（Rule Providers）—— 使用 MetaCubeX 官方数据
+# ============================================================
+rule-providers:
+  private:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/private.mrs"
+    path: ./providers/ruleset/private.mrs
+    interval: 86400
+
+  cn-domain:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/cn.mrs"
+    path: ./providers/ruleset/cn-domain.mrs
+    interval: 86400
+
+  cn-ip:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/cn.mrs"
+    path: ./providers/ruleset/cn-ip.mrs
+    interval: 86400
+
+  proxy-domain:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/geolocation-!cn.mrs"
+    path: ./providers/ruleset/proxy-domain.mrs
+    interval: 86400
+
+  openai:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/openai.mrs"
+    path: ./providers/ruleset/openai.mrs
+    interval: 86400
+
+  github:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/github.mrs"
+    path: ./providers/ruleset/github.mrs
+    interval: 86400
+
+  telegram:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/telegram.mrs"
+    path: ./providers/ruleset/telegram.mrs
+    interval: 86400
+
+  telegram-ip:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geoip/telegram.mrs"
+    path: ./providers/ruleset/telegram-ip.mrs
+    interval: 86400
+
+  microsoft:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/microsoft.mrs"
+    path: ./providers/ruleset/microsoft.mrs
+    interval: 86400
+
+  apple:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@meta/geo/geosite/apple.mrs"
+    path: ./providers/ruleset/apple.mrs
+    interval: 86400
+
+# ============================================================
+# 规则（Rules）
+# ============================================================
+rules:
+  # Windows AD 域 —— 强制直连
+  - DOMAIN-SUFFIX,moolo.net,🎯 全球直连
+
+  # 私有地址 / 局域网 —— 直连
+  - RULE-SET,private,🎯 全球直连
+
+  # OpenAI
+  - RULE-SET,openai,🤖 OpenAI
+
+  # GitHub
+  - RULE-SET,github,📦 GitHub
+
+  # Telegram
+  - RULE-SET,telegram,📨 Telegram
+  - RULE-SET,telegram-ip,📨 Telegram
+
+  # Apple
+  - RULE-SET,apple,🍎 Apple
+
+  # Microsoft
+  - RULE-SET,microsoft,Ⓜ Microsoft
+
+  # 国内域名 —— 直连
+  - RULE-SET,cn-domain,🎯 全球直连
+
+  # 国内 IP —— 直连
+  - RULE-SET,cn-ip,🎯 全球直连,no-resolve
+
+  # 国外域名 —— 代理
+  - RULE-SET,proxy-domain,🌍 国外网站
+
+  # GeoSite 数据 —— 代理
+  - GEOIP,cn,🎯 全球直连,no-resolve
+  - DOMAIN,testingcf.jsdelivr.net,🚀 节点选择
+
+  # 最终漏网
+  - MATCH,🐟 漏网之鱼
