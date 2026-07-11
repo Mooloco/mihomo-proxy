@@ -54,7 +54,7 @@ NODE_SCHEME_RE='(vmess|vless|trojan|ss|ssr|hysteria2?|hy2|tuic|anytls)://'
 # ── 抓取订阅原始内容 ───────────────────────────────────────
 echo "🔍 正在检测订阅链接可用性（UA: mihomo）..."
 
-RAW_BODY=$(curl -sS --max-time 15 --user-agent "mihomo" "$SUBSCRIPTION_URL" 2>/dev/null) || true
+RAW_BODY=$(curl -sSL --compressed --max-time 15 --user-agent "mihomo" "$SUBSCRIPTION_URL" 2>/dev/null) || true
 
 if [ -z "$RAW_BODY" ]; then
   echo "❌ 无法获取订阅内容，请检查 SUBSCRIPTION_URL 或网络连接"
@@ -84,7 +84,16 @@ else
     elif [ "$MOD" -eq 3 ]; then
       B64="${B64}="
     fi
-    NODE_LIST=$(printf '%s' "$B64" | base64 -d 2>/dev/null) || NODE_LIST=""
+
+    if command -v base64 >/dev/null 2>&1; then
+      NODE_LIST=$(printf '%s' "$B64" | base64 -d 2>/dev/null) || NODE_LIST=""
+    elif command -v openssl >/dev/null 2>&1; then
+      NODE_LIST=$(printf '%s' "$B64" | openssl base64 -d -A 2>/dev/null) || NODE_LIST=""
+    else
+      echo "❌ 系统缺少 base64 / openssl 命令，无法解码订阅内容"
+      echo "   OpenWrt 上尝试: opkg update && opkg install coreutils-base64"
+      exit 1
+    fi
   fi
 
   NODE_COUNT=$(printf '%s\n' "$NODE_LIST" | grep -cE "$NODE_SCHEME_RE" || true)
@@ -116,7 +125,7 @@ else
   fi
 
   # 验证转换结果确实包含节点
-  CONVERTED_PROBE=$(curl -sS --max-time 20 "$CONVERTED_URL" 2>/dev/null | head -c 4096) || true
+  CONVERTED_PROBE=$(curl -sSL --max-time 20 "$CONVERTED_URL" 2>/dev/null | head -c 4096) || true
 
   if echo "$CONVERTED_PROBE" | grep -q "proxies:" && ! echo "$CONVERTED_PROBE" | grep -qE "proxies:[[:space:]]*\[\]"; then
     echo "✅ 转换成功，共 ${NODE_COUNT} 个节点"
