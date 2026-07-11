@@ -1,4 +1,4 @@
-# Mihomo Proxy V1.0
+# Mihomo Proxy V2.0
 
 基于 Docker Compose 部署在 OpenWrt (x86_x64) 上的 Mihomo 代理服务器。
 
@@ -14,6 +14,7 @@
 ```text
 /opt/mihomo
 ├── .env                         # ★ 所有配置都在这里编辑
+├── run.sh                       # ★ 交互式部署向导
 ├── compose.yaml
 ├── backup/
 ├── cache/
@@ -25,6 +26,10 @@
 ├── providers/
 │   ├── proxy/
 │   └── ruleset/
+├── subconverter/
+│   ├── base/
+│   │   └── pref.toml         # SubConverter-Extended 配置
+│   └── stats/
 └── scripts/
     ├── apply-config.sh          # ★ 渲染模板 → 生成 config.yaml
     ├── generate-secret.sh
@@ -37,14 +42,15 @@
 
 ## 端口规划
 
-| 功能      | 端口 |
-|-----------|------|
-| Mixed     | 9070 |
-| SOCKS5    | 9071 |
-| HTTP      | 9072 |
-| API       | 9073 |
-| Dashboard | 9075 |
-| DNS       | 1053 |
+| 功能         | 端口  |
+|--------------|-------|
+| Mixed        | 9070  |
+| SOCKS5       | 9071  |
+| HTTP         | 9072  |
+| API          | 9073  |
+| Dashboard    | 9075  |
+| DNS          | 1053  |
+| SubConverter | 25500 |
 
 ---
 
@@ -57,33 +63,58 @@ scp -r ./mihomo root@192.168.1.1:/opt/mihomo
 ssh root@192.168.1.1
 ```
 
-### 2. 编辑 .env 文件
+### 2. 运行部署向导
+
+```sh
+cd /opt/mihomo
+sh run.sh
+```
+
+`run.sh` 会依次：询问订阅链接（`.env` 已填就跳过）→ 确认/修改 `HOST_IP` → 自动生成 Secret（已存在就跳过）→ 调用 `apply-config.sh` 渲染 `config/config.yaml` → 打印 Zashboard / API / SubConverter 面板地址和 Secret → 询问是否立即 `docker compose up -d`。
+
+不想用向导，也可以手动分步执行，见下方「手动分步操作」。
+
+### 3. 访问 Dashboard
+
+浏览器打开：`http://192.168.1.1:9075`
+
+首次连接填入：
+- API 地址：`http://192.168.1.1:9073`
+- Secret：`.env` 文件中 `SECRET=` 的值
+
+---
+
+## 手动分步操作
+
+不想用 `run.sh` 向导，也可以自己分步执行：
+
+### 1. 编辑 .env 文件
 
 ```sh
 vi /opt/mihomo/.env
 ```
 
-需要填写的三项：
+需要填写的两项：
 
 ```env
 # 你的原始订阅链接（V2Ray / SS / Trojan / VMess 等均可）
+# 如果链接本身包含 & ? = # 等特殊字符，需要用英文双引号包起来
 SUBSCRIPTION_URL=https://你的订阅链接
-
-# subconverter 公共后端（默认即可，也可填自建地址）
-SUBCONVERTER_URL=https://sub.xeton.dev
 
 # Secret 暂时留空，下一步自动生成
 SECRET=
 ```
 
-### 3. 生成 Secret
+订阅转换统一走本地自建的 SubConverter-Extended（`subconverter` 容器），不需要额外配置。
+
+### 2. 生成 Secret
 
 ```sh
 cd /opt/mihomo
 sh scripts/generate-secret.sh
 ```
 
-### 4. 生成配置文件
+### 3. 生成配置文件
 
 ```sh
 sh scripts/apply-config.sh
@@ -91,19 +122,11 @@ sh scripts/apply-config.sh
 
 此步骤读取 `.env` 中的订阅链接和 Secret，渲染成 `config/config.yaml`。
 
-### 5. 启动服务
+### 4. 启动服务
 
 ```sh
 docker compose up -d
 ```
-
-### 6. 访问 Dashboard
-
-浏览器打开：`http://192.168.1.1:9075`
-
-首次连接填入：
-- API 地址：`http://192.168.1.1:9073`
-- Secret：`.env` 文件中 `SECRET=` 的值
 
 ---
 
@@ -118,6 +141,19 @@ docker compose up -d
 | HTTP   | 192.168.1.1 | 9072 |
 
 DNS（可选）：`192.168.1.1:1053`（Fake-IP 模式）
+
+---
+
+## 订阅转换说明
+
+`apply-config.sh` 处理 `SUBSCRIPTION_URL` 时分两种情况：
+
+1. **内容本身是 Mihomo 可用格式**（含 `proxies:` 字段）→ 直接使用原链接，Mihomo 自己定期刷新，节点始终最新。
+2. **内容不是 Mihomo 可用格式**（比如常见的 base64 节点链接列表）→ 脚本自己解码、拆出节点链接，交给本地 `subconverter` 容器（SubConverter-Extended）转换成节点列表写入 `config.yaml`。
+
+第 2 种情况生成的是**运行脚本那一刻的静态快照**：SubConverter-Extended 出于反屏蔽考虑，设计上不会主动连接远程订阅服务器，所以没法像传统 subconverter 后端那样"实时"转换。机场后台更换节点后，需要手动重新执行 `sh scripts/update.sh`（或 `apply-config.sh` + 重启 mihomo）才能同步。
+
+SubConverter-Extended 默认开启了运行仪表盘（`statistics.enabled = true`），可访问 `http://192.168.1.1:25500/dashboard` 查看转换统计（首次启动/首次转换耗时略长属正常现象）。统计数据持久化在 `subconverter/stats/`，仅内网访问，未开启 Basic Auth。
 
 ---
 
@@ -225,12 +261,11 @@ docker compose ps
 
 ### 订阅拉取失败
 
-- 检查 `.env` 中 `SUBSCRIPTION_URL` 是否正确
-- 在浏览器中测试转换 URL 是否可访问：
+- 检查 `.env` 中 `SUBSCRIPTION_URL` 是否正确、是否需要用双引号包起来（见上方说明）
+- 确认 `subconverter` 容器已启动：`docker compose ps`，未启动则 `apply-config.sh` 会直接报错退出
+- 在浏览器中测试最终链接是否可访问：
   查看 `config/config.yaml` 中 `proxy-providers.subscription.url` 的值，在浏览器打开
-- 可尝试更换 `SUBCONVERTER_URL` 为其他公共后端：
-  - `https://api.v1.mk`
-  - `https://sub.mi200.top`
+- 重新运行 `sh scripts/apply-config.sh`，观察终端输出的解析节点数量和转换结果
 
 ### Secret 重置
 
@@ -246,8 +281,8 @@ docker compose restart mihomo
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SUBSCRIPTION_URL` | 原始订阅链接 | _(必填)_ |
-| `SUBCONVERTER_URL` | subconverter 后端地址 | `https://sub.xeton.dev` |
+| `SUBSCRIPTION_URL` | 原始订阅链接，含特殊字符需加双引号 | _(必填)_ |
+| `SUBCONVERTER_PORT` | 本地 SubConverter-Extended 监听端口 | `25500` |
 | `SECRET` | Dashboard/API 认证密钥 | _(由脚本生成)_ |
 | `HOST_IP` | 本机 IP | `192.168.1.1` |
 | `CHINA_DNS` | 国内/域控 DNS | `192.168.1.3` |

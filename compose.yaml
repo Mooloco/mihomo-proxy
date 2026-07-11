@@ -32,3 +32,21 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
+
+  subconverter:
+    image: ${SUBCONVERTER_IMAGE}
+    container_name: subconverter
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ}
+      - MANAGED_CONFIG_PREFIX=http://${HOST_IP}:${SUBCONVERTER_PORT}
+    ports:
+      - "${SUBCONVERTER_PORT}:25500"
+    volumes:
+      - ./subconverter/base/pref.toml:/base/pref.toml:ro
+      - ./subconverter/stats:/base/stats
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
