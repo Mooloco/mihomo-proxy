@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${SCRIPT_DIR}/.."
 
 cd "$ROOT"
+rm -f providers/proxy/subscription.yaml
 
 echo "🔄 重新生成配置..."
 sh scripts/apply-config.sh
